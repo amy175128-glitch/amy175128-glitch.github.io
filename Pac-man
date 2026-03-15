@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>משחק פקמן - Amy's Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #111;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            border: 4px solid #222;
+            background: black;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        .ui {
+            margin-top: 15px;
+            text-align: center;
+        }
+
+        .score-board {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fdff00;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            margin-bottom: 10px;
+        }
+
+        .controls-hint {
+            color: #888;
+            font-size: 14px;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        button {
+            padding: 10px 25px;
+            font-size: 18px;
+            background: #fdff00;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: scale(1.1);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="score-board">ניקוד: <span id="score">0</span></div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="overlay">
+            <h1 id="status-text">מוכנים?</h1>
+            <button id="start-btn">התחל משחק</button>
+        </div>
+    </div>
+
+    <div class="ui">
+        <div class="controls-hint">השתמש במקשי החיצים כדי לזוז</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const startBtn = document.getElementById('start-btn');
+        const overlay = document.getElementById('overlay');
+        const statusText = document.getElementById('status-text');
+
+        // Game constants
+        const TILE_SIZE = 20;
+        const ROWS = 21;
+        const COLS = 19;
+        canvas.width = COLS * TILE_SIZE;
+        canvas.height = ROWS * TILE_SIZE;
+
+        let score = 0;
+        let gameRunning = false;
+        let animationId;
+
+        // 1 = Wall, 0 = Dot, 2 = Empty, 3 = Pacman Start, 4 = Ghost Start
+        const map = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
+            [1,0,1,1,0,1,1,1,0,1,0,1,1,1,0,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,1,1,0,1,0,1,1,1,1,1,0,1,0,1,1,0,1],
+            [1,0,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,1],
+            [1,1,1,1,0,1,1,1,2,1,2,1,1,1,0,1,1,1,1],
+            [2,2,2,1,0,1,2,2,2,2,2,2,2,1,0,1,2,2,2],
+            [1,1,1,1,0,1,2,1,1,4,1,1,2,1,0,1,1,1,1],
+            [2,2,2,2,0,2,2,1,4,4,4,1,2,2,0,2,2,2,2],
+            [1,1,1,1,0,1,2,1,1,1,1,1,2,1,0,1,1,1,1],
+            [2,2,2,1,0,1,2,2,2,2,2,2,2,1,0,1,2,2,2],
+            [1,1,1,1,0,1,2,1,1,1,1,1,2,1,0,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
+            [1,0,1,1,0,1,1,1,0,1,0,1,1,1,0,1,1,0,1],
+            [1,0,0,1,0,0,0,0,0,3,0,0,0,0,0,1,0,0,1],
+            [1,1,0,1,0,1,0,1,1,1,1,1,0,1,0,1,0,1,1],
+            [1,0,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,1],
+            [1,0,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        let pellets = [];
+        let walls = [];
+
+        function initMap() {
+            pellets = [];
+            walls = [];
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (map[r][c] === 1) walls.push({x: c * TILE_SIZE, y: r * TILE_SIZE});
+                    else if (map[r][c] === 0) pellets.push({x: c * TILE_SIZE + TILE_SIZE/2, y: r * TILE_SIZE + TILE_SIZE/2, eaten: false});
+                }
+            }
+        }
+
+        class Pacman {
+            constructor() {
+                this.reset();
+            }
+            reset() {
+                this.x = 9 * TILE_SIZE + TILE_SIZE / 2;
+                this.y = 15 * TILE_SIZE + TILE_SIZE / 2;
+                this.radius = TILE_SIZE / 2 - 2;
+                this.speed = 2;
+                this.dir = {x: 0, y: 0};
+                this.nextDir = {x: 0, y: 0};
+                this.rotation = 0;
+            }
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, (0.2 + this.rotation) * Math.PI, (1.8 + this.rotation) * Math.PI);
+                ctx.lineTo(this.x, this.y);
+                ctx.fillStyle = '#fdff00';
+                ctx.fill();
+                ctx.closePath();
+            }
+            update() {
+                // Try to change direction
+                if (this.canMove(this.nextDir)) {
+                    this.dir = this.nextDir;
+                    if (this.dir.x === 1) this.rotation = 0;
+                    if (this.dir.x === -1) this.rotation = 1;
+                    if (this.dir.y === -1) this.rotation = 1.5;
+                    if (this.dir.y === 1) this.rotation = 0.5;
+                }
+
+                if (this.canMove(this.dir)) {
+                    this.x += this.dir.x * this.speed;
+                    this.y += this.dir.y * this.speed;
+                }
+
+                // Check dots
+                pellets.forEach(p => {
+                    if (!p.eaten && Math.hypot(p.x - this.x, p.y - this.y) < this.radius) {
+                        p.eaten = true;
+                        score += 10;
+                        scoreElement.innerText = score;
+                    }
+                });
+            }
+            canMove(d) {
+                const nextX = this.x + d.x * this.speed;
+                const nextY = this.y + d.y * this.speed;
+                
+                for (let wall of walls) {
+                    if (nextX + this.radius > wall.x && nextX - this.radius < wall.x + TILE_SIZE &&
+                        nextY + this.radius > wall.y && nextY - this.radius < wall.y + TILE_SIZE) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        class Ghost {
+            constructor(color, x, y) {
+                this.color = color;
+                this.startX = x * TILE_SIZE + TILE_SIZE / 2;
+                this.startY = y * TILE_SIZE + TILE_SIZE / 2;
+                this.reset();
+            }
+            reset() {
+                this.x = this.startX;
+                this.y = this.startY;
+                this.speed = 1.5;
+                this.dir = {x: 0, y: -1};
+            }
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, TILE_SIZE/2 - 2, Math.PI, 0);
+                ctx.lineTo(this.x + TILE_SIZE/2 - 2, this.y + TILE_SIZE/2 - 2);
+                ctx.lineTo(this.x - TILE_SIZE/2 - 2, this.y + TILE_SIZE/2 - 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.closePath();
+                // Eyes
+                ctx.fillStyle = "white";
+                ctx.beginPath(); ctx.arc(this.x - 4, this.y - 2, 3, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(this.x + 4, this.y - 2, 3, 0, Math.PI * 2); ctx.fill();
+            }
+            update() {
+                if (!this.canMove(this.dir) || Math.random() < 0.02) {
+                    const dirs = [{x:1,y:0}, {x:-1,y:0}, {x:0,y:1}, {x:0,y:-1}];
+                    const validDirs = dirs.filter(d => this.canMove(d));
+                    this.dir = validDirs[Math.floor(Math.random() * validDirs.length)];
+                }
+                this.x += this.dir.x * this.speed;
+                this.y += this.dir.y * this.speed;
+            }
+            canMove(d) {
+                const nextX = this.x + d.x * this.speed;
+                const nextY = this.y + d.y * this.speed;
+                for (let wall of walls) {
+                    if (nextX + TILE_SIZE/2 - 4 > wall.x && nextX - TILE_SIZE/2 + 4 < wall.x + TILE_SIZE &&
+                        nextY + TILE_SIZE/2 - 4 > wall.y && nextY - TILE_SIZE/2 + 4 < wall.y + TILE_SIZE) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        const pacman = new Pacman();
+        const ghosts = [
+            new Ghost('red', 9, 8),
+            new Ghost('pink', 8, 9),
+            new Ghost('cyan', 10, 9)
+        ];
+
+        function draw() {
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#1919a6';
+            walls.forEach(w => ctx.fillRect(w.x, w.y, TILE_SIZE, TILE_SIZE));
+
+            ctx.fillStyle = '#ffb8ae';
+            pellets.forEach(p => {
+                if (!p.eaten) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            pacman.draw();
+            ghosts.forEach(g => g.draw());
+        }
+
+        function gameLoop() {
+            if (!gameRunning) return;
+            
+            pacman.update();
+            ghosts.forEach(g => {
+                g.update();
+                if (Math.hypot(g.x - pacman.x, g.y - pacman.y) < TILE_SIZE - 5) {
+                    gameOver();
+                }
+            });
+
+            if (pellets.every(p => p.eaten)) {
+                victory();
+            }
+
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            statusText.innerText = "הפסדתם!";
+            startBtn.innerText = "נסה שוב";
+            overlay.classList.remove('hidden');
+            cancelAnimationFrame(animationId);
+        }
+
+        function victory() {
+            gameRunning = false;
+            statusText.innerText = "ניצחתם!";
+            startBtn.innerText = "שחק שוב";
+            overlay.classList.remove('hidden');
+            cancelAnimationFrame(animationId);
+        }
+
+        function start() {
+            score = 0;
+            scoreElement.innerText = score;
+            initMap();
+            pacman.reset();
+            ghosts.forEach(g => g.reset());
+            gameRunning = true;
+            overlay.classList.add('hidden');
+            gameLoop();
+        }
+
+        window.addEventListener('keydown', e => {
+            if (e.key === 'ArrowRight') pacman.nextDir = {x: 1, y: 0};
+            if (e.key === 'ArrowLeft') pacman.nextDir = {x: -1, y: 0};
+            if (e.key === 'ArrowUp') pacman.nextDir = {x: 0, y: -1};
+            if (e.key === 'ArrowDown') pacman.nextDir = {x: 0, y: 1};
+        });
+
+        startBtn.addEventListener('click', start);
+        initMap();
+        draw();
+    </script>
+</body>
+</html>
